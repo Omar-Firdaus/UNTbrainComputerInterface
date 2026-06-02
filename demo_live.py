@@ -1,13 +1,3 @@
-"""
-demo_live.py — stream live EEG band-power to the browser via WebSocket.
-
-Usage
------
-1. Make sure EMOTIV Launcher is open and headset is connected.
-2. Run: python demo_live.py
-3. Open index.html in your browser.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -33,10 +23,7 @@ async def _ws_handler(websocket) -> None:
 
 async def _broadcast(msg: str) -> None:
     if _clients:
-        await asyncio.gather(
-            *[c.send(msg) for c in set(_clients)],
-            return_exceptions=True,
-        )
+        await asyncio.gather(*[c.send(msg) for c in set(_clients)], return_exceptions=True)
 
 
 async def _serve(stream: PowStream) -> None:
@@ -59,20 +46,16 @@ async def _serve(stream: PowStream) -> None:
             if _clients:
                 asyncio.run_coroutine_threadsafe(_broadcast(msg), loop)
 
-    t = threading.Thread(target=_stream_thread, daemon=True)
-    t.start()
+    threading.Thread(target=_stream_thread, daemon=True).start()
 
     async with websockets.serve(_ws_handler, "localhost", PORT):
         print(f"\n  WebSocket server → ws://localhost:{PORT}")
         print("  Open index.html in your browser\n")
-        await asyncio.Future()  # run until interrupted
+        await asyncio.Future()
 
 
 def main() -> None:
-    print("=" * 55)
-    print("EEG CSA — Live EEG WebSocket Server")
-    print("=" * 55)
-    print("\nConnecting to Emotiv Cortex...")
+    print("Connecting to Emotiv Cortex...")
 
     try:
         stream = PowStream.from_env()
