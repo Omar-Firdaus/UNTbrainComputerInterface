@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EEG CSA · Live Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@300;400;500;700&family=Roboto+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:         #f4f6f9;
+      --bg-panel:   #ffffff;
+      --bg-header:  #1b2a44;
+      --bg-sub:     #f9fafc;
+      --border:     #d4dbe6;
+      --border2:    #e8ecf2;
+      --accent:     #1d4ed8;
+      --live:       #16a34a;
+      --warn:       #b45309;
+      --text1:      #111827;
+      --text2:      #4b5e74;
+      --text3:      #8fa0b4;
+      --mono:       'Roboto Mono', monospace;
+      --sans:       'Roboto Condensed', sans-serif;
+
+      /* matplotlib-style band colors */
+      --c-theta:    #1f77b4;
+      --c-alpha:    #d62728;
+      --c-betal:    #2ca02c;
+      --c-betah:    #9467bd;
+      --c-gamma:    #e07c00;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--bg); color: var(--text1); font-family: var(--sans); overflow: hidden; }
+
+    .app { height: 100vh; display: flex; flex-direction: column; }
+
+    /* ── HEADER ── */
+    header {
+      flex-shrink: 0; height: 50px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px;
+      background: var(--bg-header);
+      border-bottom: 3px solid #0f1e35;
+    }
+
+    .logo { display: flex; align-items: baseline; gap: 12px; }
+
+    .logo-title {
+      font-family: var(--sans);
+      font-size: 15px; font-weight: 700;
+      color: #e8edf5; letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .logo-subtitle {
+      font-family: var(--sans);
+      font-size: 11px; font-weight: 300;
+      color: #6b85a8; letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .live-pill {
+      display: flex; align-items: center; gap: 5px;
+      font-family: var(--mono); font-size: 9px;
+      color: #4ade80; letter-spacing: 0.12em;
+      border: 1px solid rgba(74,222,128,0.25);
+      border-radius: 2px; padding: 2px 8px;
+    }
+
+    .live-dot { width: 5px; height: 5px; border-radius: 50%; background: #4ade80; animation: blink 1.4s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    .header-right { display: flex; align-items: center; gap: 16px; }
+
+    .headset-meta {
+      font-family: var(--mono); font-size: 10px;
+      color: #8fa8c8; letter-spacing: 0.04em;
+    }
+
+    .headset-meta b { color: #c5d4e8; font-weight: 500; }
+
+    .status-badge {
+      font-family: var(--mono); font-size: 9px;
+      letter-spacing: 0.1em; padding: 2px 8px;
+      border-radius: 2px; border: 1px solid;
+    }
+
+    .status-badge.connected  { color: #4ade80; border-color: rgba(74,222,128,0.3); }
+    .status-badge.connecting { color: #fbbf24; border-color: rgba(251,191,36,0.3); }
+
+    /* ── LAYOUT ── */
+    main {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      grid-template-rows: 1fr 80px;
+      gap: 0;
+    }
+
+    /* ── PANEL CHROME ── */
+    .panel-heatmap {
+      grid-row: 1 / 3;
+      border-right: 1px solid var(--border);
+      background: var(--bg-panel);
+      display: flex; flex-direction: column;
+    }
+
+    .panel-chart {
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column;
+    }
+
+    .panel-stats {
+      background: var(--bg-sub);
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      border-top: 1px solid var(--border);
+    }
+
+    .panel-head {
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 14px;
+      border-bottom: 1px solid var(--border2);
+      background: var(--bg-sub);
+    }
+
+    .panel-label {
+      font-family: var(--sans);
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--text2);
+    }
+
+    .panel-tag {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text3);
+    }
+
+    /* ── HEATMAP ── */
+    .heatmap-body {
+      flex: 1; padding: 10px 12px 8px;
+      display: flex; flex-direction: column; gap: 6px;
+      min-height: 0; overflow: hidden;
+    }
+
+    .hm-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 38px repeat(5, 1fr);
+      grid-template-rows: 30px repeat(14, 1fr);
+      gap: 2px; min-height: 0;
+    }
+
+    .hm-corner {}
+
+    .hm-band-col {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-end;
+      padding-bottom: 3px;
+    }
+
+    .hm-band-sym {
+      font-family: var(--sans);
+      font-size: 11px; font-weight: 700;
+      color: var(--text1); line-height: 1;
+      letter-spacing: 0.04em;
+    }
+
+    .hm-band-hz {
+      font-family: var(--mono); font-size: 7px;
+      color: var(--text3); letter-spacing: 0.02em;
+    }
+
+    .hm-ch {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text2); display: flex; align-items: center;
+    }
+
+    .hm-cell {
+      border-radius: 2px;
+      transition: background-color 0.12s linear;
+      cursor: crosshair;
+    }
+
+    .hm-cell:hover { outline: 1px solid rgba(0,0,0,0.3); z-index: 2; }
+
+    .scale-row {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 8px;
+      padding-top: 6px; border-top: 1px solid var(--border2);
+    }
+
+    .scale-lbl { font-family: var(--mono); font-size: 8px; color: var(--text3); }
+
+    .scale-bar {
+      flex: 1; height: 4px; border-radius: 2px;
+      background: linear-gradient(to right,
+        #440154,#3b528b,#21918c,#5ec962,#fde725);
+    }
+
+    /* ── CHART ── */
+    .chart-body {
+      flex: 1; padding: 10px 16px 12px; min-height: 0;
+    }
+
+    /* ── STATS ── */
+    .stat-cell {
+      padding: 8px 12px;
+      border-right: 1px solid var(--border2);
+      display: flex; flex-direction: column; justify-content: center; gap: 2px;
+    }
+
+    .stat-cell:last-child { border-right: none; }
+
+    .stat-row { display: flex; align-items: baseline; gap: 6px; }
+
+    .stat-band {
+      font-family: var(--sans);
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 0.06em; line-height: 1;
+    }
+
+    .stat-band-name {
+      font-family: var(--mono); font-size: 8px;
+      color: var(--text3); letter-spacing: 0.06em;
+    }
+
+    .stat-val {
+      font-family: var(--mono); font-size: 16px;
+      font-variant-numeric: tabular-nums; line-height: 1.1;
+      color: var(--text1); font-weight: 500;
+    }
+
+    .stat-unit { font-family: var(--mono); font-size: 9px; color: var(--text3); }
+
+    .stat-range {
+      font-family: var(--mono); font-size: 8px;
+      color: var(--text3); letter-spacing: 0.03em;
+    }
+
+    .stat-spark { display: block; width: 100%; height: 16px; overflow: visible; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">
+      <span class="logo-title">EEG CSA</span>
+      <span class="logo-subtitle">Compressed Spectral Array</span>
+      <div class="live-pill"><div class="live-dot"></div>LIVE</div>
+    </div>
+    <div class="header-right">
+      <span class="headset-meta"><b>EPOCX-E5020C07</b> &nbsp;·&nbsp; 14 ch &nbsp;·&nbsp; 128 Hz</span>
+      <span class="status-badge connecting" id="statusBadge">CONNECTING</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="panel-heatmap">
+      <div class="panel-head">
+        <span class="panel-label">Spectral Power — All Channels</span>
+        <span class="panel-tag" id="frameBadge">—</span>
+      </div>
+      <div class="heatmap-body">
+        <div class="hm-grid" id="heatmap"></div>
+        <div class="scale-row">
+          <span class="scale-lbl">0</span>
+          <div class="scale-bar"></div>
+          <span class="scale-lbl" id="scaleMax">—</span>
+          <span class="scale-lbl" style="margin-left:2px">µV²/Hz</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-chart">
+      <div class="panel-head">
+        <span class="panel-label">Band Power Over Time (mean across channels)</span>
+        <span class="panel-tag">60-frame rolling window · µV²/Hz</span>
+      </div>
+      <div class="chart-body">
+        <canvas id="powChart"></canvas>
+      </div>
+    </div>
+
+    <div class="panel-stats" id="statsBar"></div>
+  </main>
+</div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────────
+const CHANNELS  = ['AF3','F7','F3','FC5','T7','P7','O1','O2','P8','T8','FC6','F4','F8','AF4'];
+const BAND_KEYS = ['theta','alpha','betaL','betaH','gamma'];
+const BAND_SYMS = ['THETA','ALPHA','BETA-L','BETA-H','GAMMA'];
+const BAND_HZ   = ['4–8','8–13','13–20','20–30','30–45'];
+const COLORS    = { theta:'#1f77b4', alpha:'#d62728', betaL:'#2ca02c', betaH:'#9467bd', gamma:'#e07c00' };
+const HISTORY   = 60;
+const SPARK_LEN = 28;
+
+const BASE = {
+  theta: [0.78,0.68,0.88,0.58,1.15,0.82,0.72,0.71,0.80,1.08,0.62,0.91,0.69,0.79],
+  alpha: [1.75,1.18,1.62,0.95,1.42,2.08,3.25,3.10,2.05,1.55,1.12,1.52,1.18,1.72],
+  betaL: [0.48,0.38,0.58,0.48,0.38,0.39,0.28,0.27,0.39,0.41,0.48,0.59,0.48,0.50],
+  betaH: [0.28,0.19,0.29,0.29,0.19,0.19,0.18,0.18,0.19,0.19,0.29,0.29,0.20,0.28],
+  gamma: [0.14,0.11,0.15,0.13,0.10,0.10,0.08,0.08,0.10,0.11,0.13,0.15,0.12,0.13],
+};
+
+let cur = {}; BAND_KEYS.forEach(b => cur[b] = [...BASE[b]]);
+let hist = {}, spark = {};
+BAND_KEYS.forEach(b => { hist[b] = Array(HISTORY).fill(0); spark[b] = Array(SPARK_LEN).fill(0); });
+let frameN = 0;
+
+// ── VIRIDIS COLORMAP ─────────────────────────────────────────────
+const VS = [[68,1,84],[72,40,120],[62,83,160],[49,123,180],[38,162,178],[31,200,152],[110,229,99],[188,249,51],[253,231,37]];
+function viridis(t) {
+  t = Math.max(0, Math.min(1, t));
+  const n = VS.length - 1, i = Math.floor(t*n), f = t*n - i;
+  const [r0,g0,b0] = VS[Math.min(i,n)], [r1,g1,b1] = VS[Math.min(i+1,n)];
+  return `rgb(${Math.round(r0+(r1-r0)*f)},${Math.round(g0+(g1-g0)*f)},${Math.round(b0+(b1-b0)*f)})`;
+}
+
+// ── BUILD HEATMAP ────────────────────────────────────────────────
+function buildHeatmap() {
+  const g = document.getElementById('heatmap');
+  g.innerHTML = '';
+  g.appendChild(document.createElement('div'));
+
+  BAND_KEYS.forEach((b, i) => {
+    const col = document.createElement('div');
+    col.className = 'hm-band-col';
+    col.innerHTML = `<span class="hm-band-sym">${BAND_SYMS[i]}</span><span class="hm-band-hz">${BAND_HZ[i]} Hz</span>`;
+    g.appendChild(col);
+  });
+
+  CHANNELS.forEach((ch, ci) => {
+    const l = document.createElement('div');
+    l.className = 'hm-ch'; l.textContent = ch; g.appendChild(l);
+    BAND_KEYS.forEach(b => {
+      const c = document.createElement('div');
+      c.className = 'hm-cell'; c.id = `c${ci}-${b}`; g.appendChild(c);
+    });
+  });
+}
+
+function updateHeatmap() {
+  let gmax = 0;
+  BAND_KEYS.forEach(b => cur[b].forEach(v => { if(v > gmax) gmax = v; }));
+  CHANNELS.forEach((_, ci) => {
+    BAND_KEYS.forEach(b => {
+      const el = document.getElementById(`c${ci}-${b}`);
+      if (el) el.style.backgroundColor = viridis(gmax > 0 ? cur[b][ci]/gmax : 0);
+    });
+  });
+  const sm = document.getElementById('scaleMax');
+  if (sm) sm.textContent = gmax.toFixed(3);
+}
+
+// ── CHART ────────────────────────────────────────────────────────
+const powChart = new Chart(document.getElementById('powChart').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: Array.from({length: HISTORY}, (_,i) => i),
+    datasets: BAND_KEYS.map((b, i) => ({
+      label: `${BAND_SYMS[i]}  ${b}  (${BAND_HZ[i]} Hz)`,
+      data: [...hist[b]],
+      borderColor: COLORS[b],
+      backgroundColor: 'transparent',
+      borderWidth: 1.2,
+      tension: 0,
+      pointRadius: 0,
+      pointHoverRadius: 3,
+    }))
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {duration: 0},
+    interaction: {mode:'index', intersect:false},
+    plugins: {
+      legend: {
+        display: true, position: 'top', align: 'end',
+        labels: {
+          color: '#4b5e74',
+          font: {family:"'Roboto Mono'", size:10},
+          boxWidth: 20, boxHeight: 1,
+          padding: 14,
+          usePointStyle: true, pointStyle: 'line',
+        }
+      },
+      tooltip: {
+        backgroundColor: '#ffffff',
+        borderColor: '#d4dbe6', borderWidth: 1,
+        titleColor: '#4b5e74', bodyColor: '#111827',
+        titleFont: {family:"'Roboto Mono'", size:10},
+        bodyFont:  {family:"'Roboto Mono'", size:11},
+        padding: 10,
+        callbacks: {
+          label: c => ` ${c.dataset.label.split('  ')[1]}: ${(c.raw??0).toFixed(4)} µV²/Hz`
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: {color:'rgba(0,0,0,0.04)', drawBorder:false},
+        ticks: {display:false},
+        border: {color:'rgba(0,0,0,0.08)'}
+      },
+      y: {
+        title: {
+          display: true,
+          text: 'µV²/Hz',
+          color: '#8fa0b4',
+          font: {family:"'Roboto Mono'", size:9},
+          padding: {bottom:4}
+        },
+        grid: {color:'rgba(0,0,0,0.05)', drawBorder:false},
+        ticks: {
+          color:'#8fa0b4',
+          font:{family:"'Roboto Mono'",size:9},
+          maxTicksLimit: 6,
+          callback: v => v.toFixed(3)
+        },
+        border: {color:'rgba(0,0,0,0.08)'}
+      }
+    }
+  }
+});
+
+// ── STATS ────────────────────────────────────────────────────────
+function buildStats() {
+  const bar = document.getElementById('statsBar');
+  bar.innerHTML = '';
+  BAND_KEYS.forEach((b, i) => {
+    const d = document.createElement('div');
+    d.className = 'stat-cell';
+    d.innerHTML = `
+      <div class="stat-row">
+        <span class="stat-band" style="color:${COLORS[b]}">${BAND_SYMS[i]}</span>
+        <span class="stat-band-name">${b} · ${BAND_HZ[i]} Hz</span>
+      </div>
+      <div class="stat-val" id="sv-${b}">—</div>
+      <svg class="stat-spark" id="sp-${b}" viewBox="0 0 100 16" preserveAspectRatio="none"></svg>
+      <div class="stat-range" id="sr-${b}">min – max</div>
+    `;
+    bar.appendChild(d);
+  });
+}
+
+function updateStats() {
+  BAND_KEYS.forEach(b => {
+    const vals = cur[b];
+    const mean = vals.reduce((a,c)=>a+c,0)/vals.length;
+    const mn = Math.min(...vals), mx = Math.max(...vals);
+    const variance = vals.reduce((a,c)=>a+(c-mean)**2,0)/vals.length;
+    const sd = Math.sqrt(variance);
+
+    const sv = document.getElementById(`sv-${b}`);
+    if (sv) sv.innerHTML = `${mean.toFixed(3)} <span class="stat-unit">µV²/Hz</span>`;
+
+    const sr = document.getElementById(`sr-${b}`);
+    if (sr) sr.textContent = `±${sd.toFixed(3)} sd  ·  ${mn.toFixed(3)}–${mx.toFixed(3)}`;
+
+    const pts = spark[b].filter(v=>v>0);
+    if (pts.length < 2) return;
+    const smin = Math.min(...pts), smax = Math.max(...pts), rng = smax-smin||0.001;
+    const path = pts.map((v,i) => {
+      const x = (i/(pts.length-1))*100;
+      const y = 16 - ((v-smin)/rng)*12 - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const svg = document.getElementById(`sp-${b}`);
+    if (svg) svg.innerHTML = `<polyline points="${path}" fill="none" stroke="${COLORS[b]}" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round" opacity="0.75"/>`;
+  });
+}
+
+// ── UPDATE ───────────────────────────────────────────────────────
+function commitFrame() {
+  BAND_KEYS.forEach(b => {
+    const m = cur[b].reduce((a,c)=>a+c,0)/cur[b].length;
+    hist[b]  = [...hist[b].slice(1),  m];
+    spark[b] = [...spark[b].slice(1), m];
+  });
+  powChart.data.datasets.forEach((ds,i) => { ds.data = [...hist[BAND_KEYS[i]]]; });
+  powChart.update('none');
+  updateHeatmap();
+  updateStats();
+  const fb = document.getElementById('frameBadge');
+  if (fb) fb.textContent = `n=${frameN}`;
+}
+
+function mockTick() {
+  frameN++;
+  BAND_KEYS.forEach(b => {
+    cur[b] = cur[b].map((v,i) => Math.max(0.005,
+      v + (Math.random()-0.5)*0.18*BASE[b][i]
+        + Math.sin(frameN*0.07+i*0.6)*0.06*BASE[b][i]
+    ));
+  });
+  commitFrame();
+}
+
+// ── WEBSOCKET ────────────────────────────────────────────────────
+let simInterval = null;
+function startSim() { if (!simInterval) simInterval = setInterval(mockTick, 420); }
+function stopSim()  { clearInterval(simInterval); simInterval = null; }
+
+function setStatus(text, cls) {
+  const el = document.getElementById('statusBadge');
+  if (el) { el.textContent = text; el.className = `status-badge ${cls}`; }
+}
+
+function connectWS() {
+  const ws = new WebSocket('ws://localhost:8765');
+  ws.onopen = () => { stopSim(); setStatus('CONNECTED', 'connected'); };
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    BAND_KEYS.forEach((b, bi) => { cur[b] = msg.power.map(row => row[bi]); });
+    frameN = msg.sample_index;
+    commitFrame();
+  };
+  ws.onclose = () => { setStatus('RECONNECTING', 'connecting'); startSim(); setTimeout(connectWS, 3000); };
+  ws.onerror = () => {};
+}
+
+// ── INIT ─────────────────────────────────────────────────────────
+buildHeatmap();
+buildStats();
+for (let i = 0; i < HISTORY; i++) {
+  BAND_KEYS.forEach(b => {
+    cur[b] = cur[b].map((v,idx) => Math.max(0.005, v+(Math.random()-0.5)*0.12*BASE[b][idx]));
+    hist[b][i] = cur[b].reduce((a,c)=>a+c,0)/cur[b].length;
+    if (i >= HISTORY-SPARK_LEN) spark[b][i-(HISTORY-SPARK_LEN)] = hist[b][i];
+  });
+}
+frameN = 0;
+updateHeatmap(); updateStats();
+powChart.data.datasets.forEach((ds,i) => { ds.data = [...hist[BAND_KEYS[i]]]; });
+powChart.update('none');
+startSim();
+connectWS();
+</script>
+</body>
+</html>
